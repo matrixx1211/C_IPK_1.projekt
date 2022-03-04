@@ -1,0 +1,16 @@
+{
+	"files.associations": {
+		"*.tl": "lua",
+		"string.h": "c",
+		"byteswap.h": "c",
+		"socket.h": "c",
+		"inet.h": "c",
+		"stdio.h": "c",
+		"stdlib.h": "c",
+		"unistd.h": "c",
+		"types.h": "c",
+		"string": "cpp",
+		"atomic": "c",
+		"string_view": "c"
+	}
+}
