@@ -1,3 +1,5 @@
+/* AUTOR: Marek Bitomský - xbitom00 */
+
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <stdio.h>
@@ -7,15 +9,14 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#define N 1
-#define BUFFER_SIZE 1024
-#define RESPONSE_SIZE 1024
-#define RESPONSE_TEXT_SIZE 512
-#define PATH_SIZE 10
-#define LOAD_ITEMS 10
-#define TIMES 5
-#define SLEEP 1
+#define N 10                   // Počet připojení
+#define REQUEST_SIZE 128       // Maximální délka požadavku
+#define RESPONSE_SIZE 1024     // Maximální délka odpovědi
+#define RESPONSE_TEXT_SIZE 512 // Maximální délka vlastního textu odpovědi
+#define TIMES 5                // Počet kolikrát se provede load
+#define SLEEP 20000            // 20ms
 
+/* Testování parametru, jestli uživatel zadal port */
 void param_test(int argc, char const *argv[])
 {
     if (argc != 2)
@@ -25,129 +26,69 @@ void param_test(int argc, char const *argv[])
     }
 }
 
-double load(char *response, char *response_text, int length)
-{
-
-    int c, i = 0, load[10] = {0}, j = 0,
-           idle, non_idle, total, times = TIMES,
-           total_diff, idle_diff, prev_total = 0, prev_idle = 0, prev_non_idle = 0;
-    double total_load;
-    // 0: user,     1: nice,    2: system,
-    // 3: idle,     4: iowait,  5: irq,
-    // 6: softirq,  7: steal,   8: guest, 9: guest_nice;
-    char temp[20] = {0};
-
-    while (times > 0)
-    {
-        FILE *load_info = fopen("/proc/stat", "rb");
-        while ((c = fgetc(load_info)) != '\n')
-        {
-            temp[i] = c;
-            i++;
-            if (c == ' ')
-            {
-                temp[i] = '\0';
-                if (!strstr(temp, "cpu"))
-                {
-                    load[j] = atoi(temp);
-                    j++;
-                }
-                i = 0;
-            }
-        }
-        fclose(load_info);
-
-        // Idle = idle + iowait
-        idle = load[3] + load[4];
-        // NonIdle = user + nice + system + irq + softirq + steal
-        non_idle = load[0] + load[1] + load[2] + load[5] + load[6] + load[7];
-        // Total = Idle + NonIdle
-        total = idle + non_idle;
-
-        total_diff = total - prev_total;
-        idle_diff = idle - prev_idle;
-
-        prev_idle = idle;
-        prev_total = total;
-
-        fprintf(stderr, "----------\n");
-        fprintf(stderr, "%d <- idle\n", idle);
-        fprintf(stderr, "%d <- non_idle\n", non_idle);
-        fprintf(stderr, "%d <- total\n", total);
-        fprintf(stderr, "%d <- prev_idle\n", prev_idle);
-        fprintf(stderr, "%d <- prev_total\n", prev_total);
-        fprintf(stderr, "%d <- idle_diff\n", idle_diff);
-        fprintf(stderr, "%d <- total_diff\n", total_diff);
-
-        // total_load = (total_diff - idle_diff) / total_diff;
-        //čekání před znovu vypočítáním
-        times--;
-        sleep(SLEEP);
-    }
-    total_load = (total_diff - idle_diff) / total_diff;
-
-    // idleFraction = 100 - (idle-lastIdle)*100.0/(sum-lastSum);
-    // snprintf(response_text, RESPONSE_TEXT_SIZE, "%d", 100 - (idle_diff)*100 / (total_diff));
-}
-
+/* Podle příchozího požadavku vytvoří odpověď */
 void get_response_from_path(char *buffer, char *response)
 {
     char response_text[RESPONSE_TEXT_SIZE] = {0};
-
     int length = snprintf(response, RESPONSE_SIZE, "HTTP/1.1 ");
+
+    /* V případě že příjde požadavek */
+    //... na doménové jméno
     if (strstr(buffer, " /hostname "))
     {
         memset(response_text, 0, RESPONSE_TEXT_SIZE);
         gethostname(response_text, RESPONSE_TEXT_SIZE);
-        snprintf(response + length, RESPONSE_SIZE - length, "200 OK\nContent-Type: text/plain; charset=utf-8\nContent-Length: %ld\n\n%s\r\n", strlen(response_text), response_text);
+        snprintf(response_text + strlen(response_text), RESPONSE_TEXT_SIZE, "\n");
+        snprintf(response + length, RESPONSE_SIZE - length,
+                 "200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: %ld\r\n\r\n%s\r\n",
+                 strlen(response_text), response_text);
     }
+    //... na název procesoru
     else if (strstr(buffer, " /cpu-name "))
     {
         FILE *cpuinfo = popen("lscpu | grep \"Model name:\" | sed -r 's/Model name:\\s{1,}//g'", "r");
         fgets(response_text, RESPONSE_TEXT_SIZE, cpuinfo);
         fclose(cpuinfo);
-        snprintf(response + length, RESPONSE_SIZE - length, "200 OK\nContent-Type: text/plain; charset=utf-8\nContent-Length: %ld\n\n%s\r\n", strlen(response_text), response_text);
+        if (strlen(response_text) == 0)
+            strncpy(response_text, "Please set locale!\nFor example you can use this command:\n\texport LC_ALL=C\n", RESPONSE_TEXT_SIZE);
+        snprintf(response + length, RESPONSE_SIZE - length,
+                 "200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: %ld\r\n\r\n%s\r\n",
+                 strlen(response_text), response_text);
     }
+    //... na zatížení CPU
     else if (strstr(buffer, " /load "))
     {
-        
-        int c, i = 0, load[10] = {0}, j = 0,
-               idle, non_idle, total, times = TIMES,
-               total_diff, idle_diff, prev_total = 0, prev_idle = 0, prev_non_idle = 0;
-        double total_load;
-        // 0: user,     1: nice,    2: system,
-        // 3: idle,     4: iowait,  5: irq,
-        // 6: softirq,  7: steal,   8: guest, 9: guest_nice;
-        char temp[20] = {0};
-
+        int times = TIMES, counter = 0;
+        char *token;
+        long int idle = 0, non_idle = 0, total, prev_idle = 0, prev_total = 0;
+        double idle_diff = 0.0, total_diff = 0.0;
+        /* Opakuji výpočty times-krát */
         while (times > 0)
         {
-            FILE *cpuinfo = fopen("/proc/stat", "rb");
-            while ((c = fgetc(cpuinfo)) != '\n')
+            /* Otevření souboru proc/stat pro hodnoty loadu | oříznuté na jeden řádek | oříznutí o text cpu */
+            FILE *stat = popen("cat /proc/stat | head -1 | sed -r 's/cpu\\s{1,}//g'", "r");
+            fgets(response_text, RESPONSE_TEXT_SIZE, stat);
+            fclose(stat);
+
+            token = strtok(response_text, " ");
+            counter = 0;
+            idle = 0;
+            non_idle = 0;
+            /* Načítám tokeny */
+            while (token != NULL)
             {
-                temp[i] = c;
-                i++;
-                if (c == ' ')
+                if (token != NULL)
                 {
-                    temp[i] = '\0';
-                    if (!strstr(temp, "cpu"))
-                    {
-                        load[j] = atoi(temp);
-                        j++;
-                    }
-                    i = 0;
+                    if (counter == 3 || counter == 4)
+                        idle += atoi(token);
+                    else
+                        non_idle += atoi(token);
+                    counter++;
                 }
+                token = strtok(NULL, " ");
             }
-            fclose(cpuinfo);
-
-            // Idle = idle + iowait
-            idle = load[3] + load[4];
-            // NonIdle = user + nice + system + irq + softirq + steal
-            non_idle = load[0] + load[1] + load[2] + load[5] + load[6] + load[7];
-            // Total = Idle + NonIdle
+            /* Počítám load */
             total = idle + non_idle;
-
-
 
             total_diff = total - prev_total;
             idle_diff = idle - prev_idle;
@@ -155,28 +96,17 @@ void get_response_from_path(char *buffer, char *response)
             prev_idle = idle;
             prev_total = total;
 
-            fprintf(stderr, "%d <- idle\n", load[3]);
-            fprintf(stderr, "----------\n");
-            fprintf(stderr, "%d <- idle\n", idle);
-            fprintf(stderr, "%d <- non_idle\n", non_idle);
-            fprintf(stderr, "%d <- total\n", total);
-            fprintf(stderr, "%d <- prev_idle\n", prev_idle);
-            fprintf(stderr, "%d <- prev_total\n", prev_total);
-            fprintf(stderr, "%d <- idle_diff\n", idle_diff);
-            fprintf(stderr, "%d <- total_diff\n", total_diff);
-            
-            //total_load = (total_diff - idle_diff) / total_diff;
-            //čekání před znovu vypočítáním
+            /* Uspím na dobu SLEEP v mikrosekundách pro lepší výsledky */
             times--;
-            sleep(SLEEP);
+            usleep(SLEEP);
         }
-        // idleFraction = 100 - (idle-lastIdle)*100.0/(sum-lastSum);
-        // snprintf(response_text, RESPONSE_TEXT_SIZE, "%d", 100 - (idle_diff)*100 / (total_diff));
+
+        snprintf(response_text, RESPONSE_TEXT_SIZE, "%.0f%%\n", ((total_diff - idle_diff) / total_diff) * 100);
         snprintf(response + length, RESPONSE_SIZE - length,
-                 "200 OK\nContent-Type: text/plain; charset=utf-8\nContent-Length: %ld\n\n%s\r\n",
-                 strlen(response_text),
-                 response_text);
+                 "200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: %ld\r\n\r\n%s\r\n",
+                 strlen(response_text), response_text);
     }
+    //... na nedefinovanou věc
     else
     {
         strncpy(response_text, "error", RESPONSE_TEXT_SIZE - 1);
@@ -186,14 +116,13 @@ void get_response_from_path(char *buffer, char *response)
 
 int main(int argc, char const *argv[])
 {
-    // Otestování parametetrů
     param_test(argc, argv);
 
     // Proměnné pro socket
     struct sockaddr_in address;
     int server_fd, opt = 1, valread, addrlen = sizeof(address), new_socket;
-    char buffer[BUFFER_SIZE] = {0};
-    // Pomocné proměnné
+    char buffer[REQUEST_SIZE] = {0};
+    // Proměnná pro odpověď
     char response[RESPONSE_SIZE] = {0};
 
     // Vytvoření file descriptoru
@@ -204,7 +133,7 @@ int main(int argc, char const *argv[])
     }
 
     // Nastavení socketu
-    if ((setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt))) < 0)
+    if ((setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt))) < 0)
     {
         perror("set socket opt:");
         exit(EXIT_FAILURE);
@@ -227,7 +156,7 @@ int main(int argc, char const *argv[])
         exit(EXIT_FAILURE);
     }
 
-    // Dokud neukončím
+    // Dokud neukončím přes CTRL + C nebo kill PID
     while (1)
     {
         // Přijímání dat
@@ -237,10 +166,9 @@ int main(int argc, char const *argv[])
             exit(EXIT_FAILURE);
         }
 
-        // Uložím si do bufferu z new_socketu message
-        valread = read(new_socket, buffer, BUFFER_SIZE);
+        // Uložím si do bufferu požadavek
+        valread = read(new_socket, buffer, REQUEST_SIZE);
 
-        // Podle pathu /... vytvořím odpověď
         get_response_from_path(buffer, response);
 
         // Odešlu odpověď
